@@ -2,16 +2,24 @@ import { Router } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import { createRequire } from 'module';
 import { chatCompletion, generateStructuredOutput, resolveModel } from '../services/ollamaClient.js';
 
 const require = createRequire(import.meta.url);
 const router = Router();
 
-// Ensure uploads folder exists
-const uploadsDir = path.join(process.cwd(), 'server', 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
+// Ensure uploads folder exists safely (safe on read-only serverless environments like Vercel)
+const uploadsDir = process.env.VERCEL
+  ? path.join(os.tmpdir(), 'smartedu-uploads')
+  : path.join(process.cwd(), 'server', 'uploads');
+
+try {
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+} catch (err) {
+  console.warn('[Storage] Could not create uploads directory:', err.message);
 }
 
 // Multer storage configuration

@@ -40,14 +40,21 @@ app.use((req, res, next) => {
   next();
 });
 
-// Routes
-app.use('/api/chat', chatRouter);
-app.use('/api/evaluate', evaluateRouter);
-app.use('/api/health', healthRouter);
-app.use('/api/documents', documentsRouter);
-app.use('/api/parent', parentRouter);
-app.use('/api/activity', activityRouter);
-app.use('/api/simulate', simulateRouter);
+// Routes (dual mounted on /api/* and /* for both local development and Vercel serverless functions)
+const routeList = [
+  ['chat', chatRouter],
+  ['evaluate', evaluateRouter],
+  ['health', healthRouter],
+  ['documents', documentsRouter],
+  ['parent', parentRouter],
+  ['activity', activityRouter],
+  ['simulate', simulateRouter]
+];
+
+for (const [name, router] of routeList) {
+  app.use(`/api/${name}`, router);
+  app.use(`/${name}`, router);
+}
 
 // Root health ping
 app.get('/', (req, res) => {

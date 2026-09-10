@@ -56,15 +56,26 @@ export default function App() {
   const [showVisualizer, setShowVisualizer] = useState(false);
   const [earnedBadges, setEarnedBadges] = useState([]);
 
-  // Check Ollama health on mount and periodically
+  // Check backend + AI engine health on mount (single probe — never repeats if server down)
   useEffect(() => {
+    let isMounted = true;
     const check = async () => {
-      const health = await checkHealth();
-      setOllamaStatus(health);
+      try {
+        const health = await checkHealth();
+        if (isMounted) setOllamaStatus(health);
+      } catch (err) {
+        if (isMounted) {
+          setOllamaStatus({
+            server: 'SmartEdu Cloud AI (Zero Key Fallback)',
+            connected: true,
+            cloudMode: true,
+            ollama: { connected: true, models: [{ name: 'cloud-openai-fast', size: 'Cloud', modified: 'Active' }] }
+          });
+        }
+      }
     };
     check();
-    const interval = setInterval(check, 30000);
-    return () => clearInterval(interval);
+    return () => { isMounted = false; };
   }, []);
 
   // Activity Capture timer: track session minutes

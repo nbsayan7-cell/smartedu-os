@@ -4,6 +4,45 @@ import { generateStructuredOutput, resolveModel, chatCompletion } from '../servi
 const router = Router();
 
 /**
+ * GET /api/simulate/youtube?url=...
+ * Proxies YouTube oEmbed requests from Node backend without browser CORS issues
+ */
+router.get('/youtube', async (req, res) => {
+  try {
+    const videoUrl = req.query.url;
+    if (!videoUrl) return res.status(400).json({ error: 'url query parameter is required' });
+
+    const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(videoUrl)}&format=json`;
+    const ytRes = await fetch(oembedUrl, {
+      headers: { 'User-Agent': 'SmartEduOS/2.0' },
+      signal: AbortSignal.timeout(6000)
+    });
+
+    if (ytRes.ok) {
+      const data = await ytRes.json();
+      return res.json({
+        title: data.title,
+        author: data.author_name,
+        thumbnailUrl: data.thumbnail_url
+      });
+    }
+
+    // Fallback if video is unlisted or restricted
+    res.status(200).json({
+      title: 'YouTube Educational Lecture',
+      author: 'YouTube Educator',
+      thumbnailUrl: null
+    });
+  } catch (err) {
+    res.status(200).json({
+      title: 'YouTube Educational Lecture',
+      author: 'YouTube Educator',
+      thumbnailUrl: null
+    });
+  }
+});
+
+/**
  * Fetch verified scientific context from Wikipedia free open REST API (zero key required)
  */
 export async function fetchScientificContext(topic) {

@@ -3,13 +3,14 @@ import {
   Upload, FileText, Sparkles, BrainCircuit, CheckCircle2, 
   Trash2, HelpCircle, MessageSquare, Download, Play, 
   ArrowRight, FileCode, BookOpen, AlertCircle, RefreshCw,
-  Plus, Check, X, Eye, Cpu
+  Plus, Check, X, Eye, Cpu, Youtube, ExternalLink
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { 
   fetchDocuments, uploadDocument, generateQuizFromDocument, 
   chatWithDocument, deleteDocument 
 } from '../services/ollamaService';
+import { fetchYouTubeMetadata, analyzeYouTubeLectureWithAI } from '../services/youtubeService';
 
 export default function DocumentUploadHub({ onNavigateTo, currentCurriculum }) {
   const [documents, setDocuments] = useState([]);
@@ -65,6 +66,57 @@ export default function DocumentUploadHub({ onNavigateTo, currentCurriculum }) {
       alert('Upload failed: ' + err.message);
     } finally {
       setUploading(false);
+    }
+  };
+
+  // YouTube Video Import State & Handler
+  const [youtubeUrl, setYoutubeUrl] = useState('');
+  const [importingYouTube, setImportingYouTube] = useState(false);
+  const [youtubeError, setYoutubeError] = useState('');
+
+  const handleImportYouTube = async () => {
+    if (!youtubeUrl.trim() || importingYouTube) return;
+    setImportingYouTube(true);
+    setYoutubeError('');
+
+    try {
+      const meta = await fetchYouTubeMetadata(youtubeUrl);
+      const analyzed = await analyzeYouTubeLectureWithAI(meta);
+
+      const newDoc = {
+        id: `doc-yt-${meta.videoId}`,
+        title: meta.title,
+        originalName: `YouTube: ${meta.title}`,
+        filename: `youtube_${meta.videoId}`,
+        size: 1048576,
+        mimeType: 'video/youtube',
+        uploadedAt: new Date().toISOString(),
+        author: meta.author || 'YouTube Educator',
+        curriculum: currentCurriculum || 'cs_c_dsa',
+        summary: analyzed.summary || `Educational lecture on ${meta.title}`,
+        keyConcepts: analyzed.keyConcepts || [meta.title, 'Fundamental Theory', 'Problem Solving'],
+        videoUrl: meta.embedUrl,
+        watchUrl: meta.watchUrl,
+        thumbnailUrl: meta.thumbnailUrl,
+        quizCount: (analyzed.quiz || []).length,
+        quizzes: (analyzed.quiz || []).map((q, idx) => ({
+          id: `qz-yt-${idx}`,
+          question: q.question,
+          options: q.options,
+          correctIndex: q.correctIndex,
+          difficulty: 0.2,
+          discrimination: 1.5,
+          misconceptionNote: q.explanation
+        }))
+      };
+
+      setDocuments(prev => [newDoc, ...prev.filter(d => d.id !== newDoc.id)]);
+      setYoutubeUrl('');
+      confetti({ particleCount: 70, spread: 60, origin: { y: 0.7 } });
+    } catch (err) {
+      setYoutubeError(err.message || 'Failed to import YouTube video.');
+    } finally {
+      setImportingYouTube(false);
     }
   };
 
@@ -244,6 +296,44 @@ export default function DocumentUploadHub({ onNavigateTo, currentCurriculum }) {
         </div>
       </div>
 
+      {/* ── YouTube Video Import Bar ── */}
+      <div className="card-elevated p-4 rounded-2xl border border-red-500/30 bg-gradient-to-r from-dark-950 via-[#18070d] to-dark-900 shadow-lg">
+        <div className="flex items-center gap-2 mb-2">
+          <Youtube className="w-4 h-4 text-red-500" />
+          <span className="text-xs font-mono font-bold text-red-300 uppercase tracking-wider">
+            Import & AI-Analyze YouTube Video Lecture
+          </span>
+          <span className="text-2xs text-slate-500 font-mono ml-auto hidden sm:inline">
+            Turn any YouTube lecture into an interactive AI study guide + quiz
+          </span>
+        </div>
+
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input
+            type="text"
+            value={youtubeUrl}
+            onChange={(e) => setYoutubeUrl(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleImportYouTube()}
+            placeholder="Paste YouTube Video URL (e.g. https://www.youtube.com/watch?v=sI5Ftm1-jik)"
+            className="flex-1 px-4 py-2 rounded-xl bg-dark-900/90 border border-slate-700/60 text-xs text-white placeholder-slate-500 font-mono focus:outline-none focus:border-red-400"
+          />
+          <button
+            onClick={handleImportYouTube}
+            disabled={importingYouTube || !youtubeUrl.trim()}
+            className="px-4 py-2 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white text-xs font-mono font-bold flex items-center justify-center gap-1.5 disabled:opacity-50 transition-all cursor-pointer shadow-lg shadow-red-600/20 shrink-0"
+          >
+            {importingYouTube ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 text-yellow-300" />}
+            <span>{importingYouTube ? 'Analyzing...' : 'Import Lecture'}</span>
+          </button>
+        </div>
+
+        {youtubeError && (
+          <p className="text-2xs font-mono text-rose-400 mt-2 bg-rose-500/10 border border-rose-500/30 px-3 py-1 rounded-lg">
+            ⚠️ {youtubeError}
+          </p>
+        )}
+      </div>
+
       {/* ── Uploaded Documents Grid ── */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
@@ -280,15 +370,21 @@ export default function DocumentUploadHub({ onNavigateTo, currentCurriculum }) {
                   {/* Top badges */}
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <div className="flex items-center space-x-2">
-                      <span className="p-2 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-400">
-                        {doc.mimeType?.includes('pdf') ? <FileText className="w-4 h-4" /> : <FileCode className="w-4 h-4" />}
+                      <span className={`p-2 rounded-lg border ${
+                        doc.mimeType?.includes('youtube')
+                          ? 'bg-red-500/10 border-red-500/30 text-red-400'
+                          : doc.mimeType?.includes('pdf')
+                          ? 'bg-cyan-500/10 border-cyan-500/20 text-cyan-400'
+                          : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                      }`}>
+                        {doc.mimeType?.includes('youtube') ? <Youtube className="w-4 h-4" /> : doc.mimeType?.includes('pdf') ? <FileText className="w-4 h-4" /> : <FileCode className="w-4 h-4" />}
                       </span>
                       <div>
                         <h3 className="text-xs font-bold text-white group-hover:text-cyan-300 transition-colors line-clamp-1">
                           {doc.title}
                         </h3>
                         <p className="text-2xs text-slate-500 font-mono">
-                          {doc.originalName} • {(doc.size / 1024).toFixed(0)} KB
+                          {doc.author || doc.originalName} {doc.mimeType?.includes('youtube') ? '• YouTube Video' : `• ${(doc.size / 1024).toFixed(0)} KB`}
                         </p>
                       </div>
                     </div>

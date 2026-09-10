@@ -100,30 +100,50 @@ export async function resolveModel(requestedModel) {
 /**
  * Call Pollinations.ai free cloud API (OpenAI-compatible format)
  * Completely free, no API key, unlimited tokens.
+ * Retries with model fallback chain: openai → openai-fast → openai-large
  */
+const CLOUD_MODELS = ['openai', 'openai-fast', 'openai-large'];
+
 async function pollinationsChat(messages, options = {}) {
-  const res = await fetch(POLLINATIONS_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      messages,
-      model: options.model || 'openai-fast',
-      temperature: options.temperature ?? 0.7,
-      max_tokens: options.max_tokens ?? 2048
-    }),
-    signal: AbortSignal.timeout(options.timeout ?? 60000)
-  });
+  const requestedModel = options.model || 'openai';
+  const modelsToTry = [requestedModel, ...CLOUD_MODELS.filter(m => m !== requestedModel)];
+  let lastError = null;
 
-  if (!res.ok) {
-    throw new Error(`Pollinations.ai error ${res.status}`);
+  for (const m of modelsToTry) {
+    try {
+      const res = await fetch(POLLINATIONS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages,
+          model: m,
+          temperature: options.temperature ?? 0.7,
+          max_tokens: options.max_tokens ?? 2048
+        }),
+        signal: AbortSignal.timeout(options.timeout ?? 60000)
+      });
+
+      if (res.ok) {
+        const text = await res.text();
+        // Guard against HTML error pages (Cloudflare 502, etc.)
+        if (text.startsWith('<!DOCTYPE') || text.startsWith('<html')) {
+          lastError = new Error(`Pollinations returned HTML error page (model: ${m})`);
+          console.warn(`[Pollinations] Model ${m} returned HTML error page, trying next...`);
+          continue;
+        }
+        return {
+          content: text,
+          model: `pollinations-${m}`,
+          provider: 'pollinations.ai (free unlimited)'
+        };
+      }
+      lastError = new Error(`Pollinations.ai HTTP ${res.status} (model: ${m})`);
+    } catch (err) {
+      lastError = err;
+      console.warn(`[Pollinations] Model ${m} failed:`, err.message);
+    }
   }
-
-  const text = await res.text();
-  return {
-    content: text,
-    model: 'pollinations-openai-fast',
-    provider: 'pollinations.ai (free unlimited)'
-  };
+  throw lastError || new Error('All Pollinations.ai models unavailable');
 }
 
 /**
